@@ -11,18 +11,16 @@ var UuidChan = make(chan []byte, 1000)
 
 func UuidFactory() {
 	for {
-		UuidChan <- Uuid()
+		UuidChan <- uuid()
 	}
 }
 
-func Uuid() []byte {
+func uuid() []byte {
 	b := make([]byte, 16)
 	_, err := io.ReadFull(rand.Reader, b)
 	if err != nil {
 		log.Fatal(err)
 	}
-	b[6] = (b[6] & 0x0F) | 0x40
-	b[8] = (b[8] &^ 0x40) | 0x80
 	return b
 }
 
