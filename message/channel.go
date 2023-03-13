@@ -211,6 +211,10 @@ func (c *Channel) MessagePump(closeChan chan struct{}) {
 			return
 		}
 
+		if msg != nil {
+			c.inFlightMessageChan <- msg
+		}
+
 		c.clientMessageChan <- msg
 	}
 }
