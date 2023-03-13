@@ -16,7 +16,7 @@ type Channel struct {
 	clients             []Consumer
 	incomingMessageChan chan *Message
 	msgChan             chan *Message
-	ClientMessageChan   chan *Message
+	clientMessageChan   chan *Message
 	exitChan            chan util.ChanReq
 }
 
@@ -28,7 +28,7 @@ func NewChannel(name string, inMemSize int) *Channel {
 		clients:             make([]Consumer, 0, 5),
 		incomingMessageChan: make(chan *Message, 5),
 		msgChan:             make(chan *Message, inMemSize),
-		ClientMessageChan:   make(chan *Message),
+		clientMessageChan:   make(chan *Message),
 		exitChan:            make(chan util.ChanReq),
 	}
 	go channel.Router()
@@ -59,14 +59,18 @@ func (c *Channel) PutMessage(msg *Message) {
 	c.incomingMessageChan <- msg
 }
 
+func (c *Channel) PullMessage() *Message {
+	return <-c.clientMessageChan
+}
+
 // Router handles the events of Channel
 func (c *Channel) Router() {
 	var (
-		clientReq            util.ChanReq
-		messagePumpCloseChan = make(chan struct{})
+		clientReq util.ChanReq
+		closeChan = make(chan struct{})
 	)
 
-	go c.MessagePump(messagePumpCloseChan)
+	go c.MessagePump(closeChan)
 
 	for {
 		select {
@@ -97,13 +101,15 @@ func (c *Channel) Router() {
 				log.Printf("CHANNEL(%s) wrote message", c.name)
 			default:
 			}
-		case <-c.exitChan:
+		case closeReq := <-c.exitChan:
 			log.Printf("CHANNEL(%s) is closing", c.name)
-			messagePumpCloseChan <- struct{}{}
+			close(closeChan)
 
 			for _, consumer := range c.clients {
 				consumer.Close()
 			}
+
+			closeReq.RetChan <- nil
 		}
 	}
 }
@@ -119,7 +125,7 @@ func (c *Channel) MessagePump(closeChan chan struct{}) {
 			return
 		}
 
-		c.ClientMessageChan <- msg
+		c.clientMessageChan <- msg
 	}
 }
 
