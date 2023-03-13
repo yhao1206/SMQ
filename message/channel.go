@@ -1,8 +1,10 @@
 package message
 
 import (
+	"errors"
 	"github.com/yhao1206/SMQ/util"
 	"log"
+	"time"
 )
 
 type Consumer interface {
@@ -18,6 +20,10 @@ type Channel struct {
 	msgChan             chan *Message
 	clientMessageChan   chan *Message
 	exitChan            chan util.ChanReq
+	inFlightMessageChan chan *Message
+	inFlightMessages    map[string]*Message
+	requeueMessageChan  chan util.ChanReq
+	finishMessageChan   chan util.ChanReq
 }
 
 func NewChannel(name string, inMemSize int) *Channel {
@@ -30,6 +36,10 @@ func NewChannel(name string, inMemSize int) *Channel {
 		msgChan:             make(chan *Message, inMemSize),
 		clientMessageChan:   make(chan *Message),
 		exitChan:            make(chan util.ChanReq),
+		inFlightMessageChan: make(chan *Message),
+		inFlightMessages:    make(map[string]*Message),
+		requeueMessageChan:  make(chan util.ChanReq),
+		finishMessageChan:   make(chan util.ChanReq),
 	}
 	go channel.Router()
 	return channel
@@ -63,6 +73,40 @@ func (c *Channel) PullMessage() *Message {
 	return <-c.clientMessageChan
 }
 
+func (c *Channel) FinishMessage(uuidStr string) error {
+	errChan := make(chan interface{})
+	c.finishMessageChan <- util.ChanReq{
+		Variable: uuidStr,
+		RetChan:  errChan,
+	}
+	err, _ := (<-errChan).(error)
+	return err
+}
+
+func (c *Channel) RequeueMessage(uuidStr string) error {
+	errChan := make(chan interface{})
+	c.requeueMessageChan <- util.ChanReq{
+		Variable: uuidStr,
+		RetChan:  errChan,
+	}
+	err, _ := (<-errChan).(error)
+	return err
+}
+
+func (c *Channel) pushInFlightMessage(msg *Message) {
+	c.inFlightMessages[util.UuidToStr(msg.Uuid())] = msg
+}
+
+func (c *Channel) popInFlightMessage(uuidStr string) (*Message, error) {
+	msg, ok := c.inFlightMessages[uuidStr]
+	if !ok {
+		return nil, errors.New("UUID not in flight")
+	}
+	delete(c.inFlightMessages, uuidStr)
+	msg.EndTimer()
+	return msg, nil
+}
+
 // Router handles the events of Channel
 func (c *Channel) Router() {
 	var (
@@ -70,6 +114,7 @@ func (c *Channel) Router() {
 		closeChan = make(chan struct{})
 	)
 
+	go c.RequeueRouter(closeChan)
 	go c.MessagePump(closeChan)
 
 	for {
@@ -110,6 +155,47 @@ func (c *Channel) Router() {
 			}
 
 			closeReq.RetChan <- nil
+		}
+	}
+}
+
+func (c *Channel) RequeueRouter(closeChan chan struct{}) {
+	for {
+		select {
+		case msg := <-c.inFlightMessageChan:
+			c.pushInFlightMessage(msg)
+			go func(msg *Message) {
+				select {
+				case <-time.After(60 * time.Second):
+					log.Printf("CHANNEL(%s): auto requeue of message(%s)", c.name, util.UuidToStr(msg.Uuid()))
+				case <-msg.timerChan:
+					return
+				}
+				err := c.RequeueMessage(util.UuidToStr(msg.Uuid()))
+				if err != nil {
+					log.Printf("ERROR: channel(%s) - %s", c.name, err.Error())
+				}
+			}(msg)
+		case requeueReq := <-c.requeueMessageChan:
+			uuidStr := requeueReq.Variable.(string)
+			msg, err := c.popInFlightMessage(uuidStr)
+			if err != nil {
+				log.Printf("ERROR: failed to requeue message(%s) - %s", uuidStr, err.Error())
+			} else {
+				go func(msg *Message) {
+					c.PutMessage(msg)
+				}(msg)
+			}
+			requeueReq.RetChan <- err
+		case finishReq := <-c.finishMessageChan:
+			uuidStr := finishReq.Variable.(string)
+			_, err := c.popInFlightMessage(uuidStr)
+			if err != nil {
+				log.Printf("ERROR: failed to finish message(%s) - %s", uuidStr, err.Error())
+			}
+			finishReq.RetChan <- err
+		case <-closeChan:
+			return
 		}
 	}
 }

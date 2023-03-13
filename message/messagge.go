@@ -1,12 +1,14 @@
 package message
 
 type Message struct {
-	data []byte
+	data      []byte
+	timerChan chan struct{}
 }
 
 func NewMessage(data []byte) *Message {
 	return &Message{
-		data: data,
+		data:      data,
+		timerChan: make(chan struct{}),
 	}
 }
 
@@ -20,4 +22,12 @@ func (m *Message) Body() []byte {
 
 func (m *Message) Data() []byte {
 	return m.data
+}
+
+func (m *Message) EndTimer() {
+	select {
+	case m.timerChan <- struct{}{}:
+	default:
+
+	}
 }
