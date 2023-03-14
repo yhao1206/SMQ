@@ -2,6 +2,7 @@ package message
 
 import (
 	"errors"
+	"github.com/yhao1206/SMQ/queue"
 	"github.com/yhao1206/SMQ/util"
 	"log"
 	"time"
@@ -24,6 +25,7 @@ type Channel struct {
 	inFlightMessages    map[string]*Message
 	requeueMessageChan  chan util.ChanReq
 	finishMessageChan   chan util.ChanReq
+	backend             queue.Queue
 }
 
 func NewChannel(name string, inMemSize int) *Channel {
@@ -40,6 +42,7 @@ func NewChannel(name string, inMemSize int) *Channel {
 		inFlightMessages:    make(map[string]*Message),
 		requeueMessageChan:  make(chan util.ChanReq),
 		finishMessageChan:   make(chan util.ChanReq),
+		backend:             queue.NewDiskQueue(name),
 	}
 	go channel.Router()
 	return channel
@@ -143,8 +146,13 @@ func (c *Channel) Router() {
 		case msg := <-c.incomingMessageChan:
 			select {
 			case c.msgChan <- msg:
-				log.Printf("CHANNEL(%s) wrote message", c.name)
+				log.Printf("Channel(%s) wrote message", c.name)
 			default:
+				err := c.backend.Put(msg.data)
+				if err != nil {
+					log.Printf("ERROR: c.backend.Put() - %s", err.Error())
+				}
+				log.Printf("CHANNEL(%s): wrote to backend", c.name)
 			}
 		case closeReq := <-c.exitChan:
 			log.Printf("CHANNEL(%s) is closing", c.name)
@@ -154,7 +162,7 @@ func (c *Channel) Router() {
 				consumer.Close()
 			}
 
-			closeReq.RetChan <- nil
+			closeReq.RetChan <- c.backend.Close()
 		}
 	}
 }
@@ -207,6 +215,13 @@ func (c *Channel) MessagePump(closeChan chan struct{}) {
 	for {
 		select {
 		case msg = <-c.msgChan:
+		case <-c.backend.ReadReadyChan():
+			buf, err := c.backend.Get()
+			if err != nil {
+				log.Printf("ERROR: c.backend.Get() - %s", err.Error())
+				continue
+			}
+			msg = NewMessage(buf)
 		case <-closeChan:
 			return
 		}
