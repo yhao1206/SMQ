@@ -78,11 +78,13 @@ func (t *Topic) PutMessage(msg *Message) {
 	t.incomingMessageChan <- msg
 }
 
-func (t *Topic) MessagePump() {
+func (t *Topic) MessagePump(closeChan <-chan struct{}) {
 	var msg *Message
 	for {
 		select {
 		case msg = <-t.msgChan:
+		case <-closeChan:
+			return
 		}
 
 		t.readSyncChan <- struct{}{}
@@ -98,7 +100,10 @@ func (t *Topic) MessagePump() {
 }
 
 func (t *Topic) Router(inMemSize int) {
-	var msg *Message
+	var (
+		msg       *Message
+		closeChan = make(chan struct{})
+	)
 	for {
 		select {
 		case channelReq := <-t.newChannelChan:
@@ -111,7 +116,7 @@ func (t *Topic) Router(inMemSize int) {
 			}
 			channelReq.RetChan <- channel
 			if !t.channelWriteStarted {
-				go t.MessagePump()
+				go t.MessagePump(closeChan)
 				t.channelWriteStarted = true
 			}
 		case msg = <-t.incomingMessageChan:
@@ -132,6 +137,7 @@ func (t *Topic) Router(inMemSize int) {
 				}
 			}
 
+			close(closeChan)
 			closeReq.RetChan <- nil
 		}
 	}
