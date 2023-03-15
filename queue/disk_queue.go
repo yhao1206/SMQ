@@ -34,9 +34,11 @@ func NewDiskQueue(name string) *DiskQueue {
 		exitChan: make(chan util.ChanReq),
 	}
 
-	err := diskQueue.retrieveMetaData()
-	if err != nil {
-		log.Printf("WARNING: failed to retrieveMetaData() - %s", err.Error())
+	if _, err := os.Stat(diskQueue.metaDataFileName()); err == nil {
+		err = diskQueue.retrieveMetaData()
+		if err != nil {
+			log.Printf("WARNING: failed to retrieveMetaData() - %s", err.Error())
+		}
 	}
 
 	go diskQueue.router()

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/binary"
 	"github.com/yhao1206/SMQ/protocol"
 	"io"
@@ -55,10 +56,10 @@ func (c *Client) Close() {
 }
 
 // Handle reads data from the client, keeps state, and responds.
-func (c *Client) Handle() {
+func (c *Client) Handle(ctx context.Context) {
 	defer c.Close()
 	proto := &protocol.Protocol{}
-	err := proto.IOLoop(c)
+	err := proto.IOLoop(ctx, c)
 	if err != nil {
 		log.Printf("ERROR: client(%s) - %s", c.String(), err.Error())
 		return

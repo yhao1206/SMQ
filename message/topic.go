@@ -1,6 +1,7 @@
 package message
 
 import (
+	"context"
 	"github.com/yhao1206/SMQ/queue"
 	"github.com/yhao1206/SMQ/util"
 	"log"
@@ -49,7 +50,7 @@ func GetTopic(name string) *Topic {
 	return (<-topicChan).(*Topic)
 }
 
-func TopicFactory(inMemSize int) {
+func TopicFactory(ctx context.Context, inMemSize int) {
 	var (
 		topicReq util.ChanReq
 		name     string
@@ -57,14 +58,19 @@ func TopicFactory(inMemSize int) {
 		ok       bool
 	)
 	for {
-		topicReq = <-newTopicChan
-		name = topicReq.Variable.(string)
-		if topic, ok = TopicMap[name]; !ok {
-			topic = NewTopic(name, inMemSize)
-			TopicMap[name] = topic
-			log.Printf("TOPIC %s CREATED", name)
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			topicReq = <-newTopicChan
+			name = topicReq.Variable.(string)
+			if topic, ok = TopicMap[name]; !ok {
+				topic = NewTopic(name, inMemSize)
+				TopicMap[name] = topic
+				log.Printf("TOPIC %s CREATED", name)
+			}
+			topicReq.RetChan <- topic
 		}
-		topicReq.RetChan <- topic
 	}
 }
 
