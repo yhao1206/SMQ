@@ -7,7 +7,6 @@ import (
 	"github.com/yhao1206/SMQ/message"
 	"github.com/yhao1206/SMQ/protocol"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -26,7 +25,7 @@ func NewReqParams(req *http.Request) (*ReqParams, error) {
 		return nil, err
 	}
 
-	data, err := ioutil.ReadAll(req.Body)
+	data, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +58,7 @@ func HttpServer(ctx context.Context, address string, port string, endChan chan s
 			log.Fatal("http.ListenAndServe:", err)
 		}
 	}()
-	
+
 	<-ctx.Done()
 	log.Printf("HTTP server on %s is shutdowning...", fqAddress)
 	timeoutCtx, fn := context.WithTimeout(context.Background(), 10*time.Second)
